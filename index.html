@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Photobooth Wall</title>
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500&family=Space+Mono&display=swap');
+
+  :root {
+    --bg: #0e0e0e;
+    --accent: #c8f060;
+    --text: #e8e8e0;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    font-family: 'Space Grotesk', sans-serif;
+    overflow: hidden;
+  }
+
+  /* GRID WALL */
+  #wall {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .photo {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid #2e2e2e;
+    box-shadow: 0 0 12px rgba(0,0,0,0.5);
+    opacity: 0;
+    transform: scale(0.95);
+    animation: pop 300ms ease-out forwards;
+  }
+
+  @keyframes pop {
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  /* optional header */
+  #status {
+    position: fixed;
+    bottom: 10px;
+    left: 10px;
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    color: rgba(200,240,96,0.6);
+    z-index: 10;
+  }
+
+  /* subtle scanline vibe (optional cool for projection) */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(255,255,255,0.03),
+      rgba(255,255,255,0.03) 1px,
+      transparent 2px,
+      transparent 4px
+    );
+    opacity: 0.2;
+  }
+</style>
+</head>
+
+<body>
+
+<div id="wall"></div>
+<div id="status">waiting for photobooth…</div>
+
+<script>
+/* =========================
+   BroadcastChannel setup
+========================= */
+const channel = new BroadcastChannel("photobooth-wall");
+
+const wall = document.getElementById("wall");
+const status = document.getElementById("status");
+
+/* keep last N images */
+const MAX_IMAGES = 60;
+
+channel.onmessage = (event) => {
+  const data = event.data;
+  if (!data || data.type !== "photo") return;
+
+  addPhoto(data.image);
+};
+
+/* =========================
+   Add photo to wall
+========================= */
+function addPhoto(src) {
+  const img = document.createElement("img");
+  img.src = src;
+  img.className = "photo";
+
+  wall.prepend(img);
+
+  status.textContent = "live feed active";
+
+  // limit memory usage
+  const children = wall.children;
+  if (children.length > MAX_IMAGES) {
+    wall.removeChild(children[children.length - 1]);
+  }
+}
+
+/* =========================
+   Optional: demo feed
+   (remove in production)
+========================= */
+/*
+setInterval(() => {
+  addPhoto("https://picsum.photos/600/600?random=" + Math.random());
+}, 2000);
+*/
+</script>
+
+</body>
+</html>
