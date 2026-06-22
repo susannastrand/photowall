@@ -95,9 +95,9 @@ channel.onmessage = (event) => {
   addSet(data.images);
   status.textContent = "live feed active";
   const saved = localStorage.getItem("lastProjections"); 
-  if (saved) { 
-    const payload = JSON.parse(saved); 
-    // viktig: trig samme flyt som live message channel.postMessage(payload); }
+  if (saved) {
+  const payload = JSON.parse(saved);
+  addSet(payload.images);
 }
 };
 
