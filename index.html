@@ -86,7 +86,14 @@
 const channel = new BroadcastChannel("photobooth-wall");
 const wall = document.getElementById("wall");
 const status = document.getElementById("status");
+["mercator", "peters", "robinson", "goode"].forEach(key => {
+  const saved = localStorage.getItem("lastProjection_" + key);
 
+  if (saved) {
+    const payload = JSON.parse(saved);
+    addImage(payload.image, payload.name);
+  }
+});
 channel.onmessage = (event) => {
   const data = event.data;
 
