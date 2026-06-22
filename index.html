@@ -83,56 +83,36 @@
 <div id="status">waiting for photobooth…</div>
 
 <script>
-/* =========================
-   BroadcastChannel setup
-========================= */
 const channel = new BroadcastChannel("photobooth-wall");
 const wall = document.getElementById("wall");
 const status = document.getElementById("status");
 
-/* keep last N images */
-const MAX_IMAGES = 60;
-
 channel.onmessage = (event) => {
-  if (event.data.type === "projections") {
-    const imgs = event.data.images;
+  const data = event.data;
 
-    addPhoto(imgs.mercator);
-    addPhoto(imgs.peters);
-    addPhoto(imgs.robinson);
-    addPhoto(imgs.goode);
-  }
+  if (data.type !== "snapshot") return;
+
+  addSet(data.images);
+  status.textContent = "live feed active";
 };
 
-/* =========================
-   Add photo to wall
-========================= */
-function addPhoto(src) {
-  const img = document.createElement("img");
-  img.src = src;
-  img.className = "photo";
+function addSet(images) {
+  const container = document.createElement("div");
+  container.style.display = "grid";
+  container.style.gridTemplateColumns = "1fr 1fr";
+  container.style.gap = "6px";
+  container.style.marginBottom = "12px";
 
-  wall.prepend(img);
+  Object.values(images).forEach(src => {
+    const img = document.createElement("img");
+    img.src = src;
+    img.style.width = "100%";
+    img.style.borderRadius = "6px";
+    container.appendChild(img);
+  });
 
-  status.textContent = "live feed active";
-
-  // limit memory usage
-  const children = wall.children;
-  if (children.length > MAX_IMAGES) {
-    wall.removeChild(children[children.length - 1]);
-  }
+  wall.prepend(container);
 }
-
-/* =========================
-   Optional: demo feed
-   (remove in production)
-========================= */
-/*
-setInterval(() => {
-  addPhoto("https://picsum.photos/600/600?random=" + Math.random());
-}, 2000);
-*/
 </script>
-
 </body>
 </html>
