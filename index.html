@@ -87,7 +87,6 @@
    BroadcastChannel setup
 ========================= */
 const channel = new BroadcastChannel("photobooth-wall");
-
 const wall = document.getElementById("wall");
 const status = document.getElementById("status");
 
@@ -96,7 +95,12 @@ const MAX_IMAGES = 60;
 
 channel.onmessage = (event) => {
   if (event.data.type === "projections") {
-    addSet(event.data.images);
+    const imgs = event.data.images;
+
+    addPhoto(imgs.mercator);
+    addPhoto(imgs.peters);
+    addPhoto(imgs.robinson);
+    addPhoto(imgs.goode);
   }
 };
 
