@@ -95,10 +95,9 @@ const status = document.getElementById("status");
 const MAX_IMAGES = 60;
 
 channel.onmessage = (event) => {
-  const data = event.data;
-  if (!data || data.type !== "photo") return;
-
-  addPhoto(data.image);
+  if (event.data.type === "projections") {
+    addSet(event.data.images);
+  }
 };
 
 /* =========================
