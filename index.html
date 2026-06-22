@@ -90,7 +90,7 @@ const status = document.getElementById("status");
 channel.onmessage = (event) => {
   const data = event.data;
 
-  if (data.type !== "snapshot") return;
+  if (data.type !== "projections") return;
 
   addSet(data.images);
   status.textContent = "live feed active";
