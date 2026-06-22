@@ -90,9 +90,8 @@ const status = document.getElementById("status");
 channel.onmessage = (event) => {
   const data = event.data;
 
-  if (data.type !== "projections") return;
-
-  addSet(data.images);
+ if (data.type !== "projection") return;
+addImage(data.image, data.name);
   status.textContent = "live feed active";
   const saved = localStorage.getItem("lastProjections"); 
   if (saved) {
@@ -101,22 +100,27 @@ channel.onmessage = (event) => {
 }
 };
 
-function addSet(images) {
-  const container = document.createElement("div");
-  container.style.display = "grid";
-  container.style.gridTemplateColumns = "1fr 1fr";
-  container.style.gap = "6px";
-  container.style.marginBottom = "12px";
+function addImage(src, name) {
+  const img = document.createElement("img");
+  img.src = src;
+  img.className = "photo";
 
-  Object.values(images).forEach(src => {
-    const img = document.createElement("img");
-    img.src = src;
-    img.style.width = "100%";
-    img.style.borderRadius = "6px";
-    container.appendChild(img);
-  });
+  const wrap = document.createElement("div");
+  wrap.style.display = "flex";
+  wrap.style.flexDirection = "column";
+  wrap.style.gap = "4px";
 
-  wall.prepend(container);
+  const label = document.createElement("div");
+  label.textContent = name;
+  label.style.fontSize = "10px";
+  label.style.color = "rgba(200,240,96,0.6)";
+  label.style.fontFamily = "monospace";
+
+  wrap.appendChild(img);
+  wrap.appendChild(label);
+
+  wall.prepend(wrap);
+
 }
 </script>
 </body>
