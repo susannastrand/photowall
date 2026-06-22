@@ -90,14 +90,10 @@ const status = document.getElementById("status");
 channel.onmessage = (event) => {
   const data = event.data;
 
- if (data.type !== "projection") return;
-addImage(data.image, data.name);
+  if (data.type !== "projection") return;
+
+  addImage(data.image, data.name);
   status.textContent = "live feed active";
-  const saved = localStorage.getItem("lastProjections"); 
-  if (saved) {
-  const payload = JSON.parse(saved);
-  addSet(payload.images);
-}
 };
 
 function addImage(src, name) {
