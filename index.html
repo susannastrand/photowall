@@ -151,9 +151,10 @@ const MAX_IMAGES = 120;
 function computeGrid(n) {
   if (n === 0) return { cols: 4, rows: 3 };
   const aspect = window.innerWidth / window.innerHeight;
-  const cols = Math.max(3, Math.round(Math.sqrt(n * aspect)));
+ const cols = 5;
   const rows = Math.ceil(n / cols);
-  return { cols: Math.max(cols, 1), rows: Math.max(rows, 1) };
+  return { cols, rows };
+}
 }
 
 function applyGrid(cols, rows) {
