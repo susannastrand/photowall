@@ -141,8 +141,8 @@ const empty   = document.getElementById('empty');
 const liveDot = document.getElementById('live-dot');
 const clearBtn = document.getElementById('clear-btn');
 
-const PROJ_KEYS   = ['mercator', 'peters', 'robinson', 'goode'];
-const MAX_IMAGES  = 60; // max individual cells on the wall
+const PROJ_KEYS  = ['mercator', 'peters', 'robinson', 'goode'];
+const MAX_IMAGES = 60;
 
 // ── GRID LAYOUT ──────────────────────────────────
 // We keep a flat list of placed cells (each = one projection image).
@@ -165,7 +165,10 @@ function applyGrid(cols, rows) {
 // Store flat list of { id, key, src } — one entry per projection image
 
 function loadCells() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
+  try {
+    const cells = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    return cells.filter(c => c.src && c.src !== 'undefined');
+  }
   catch { return []; }
 }
 
@@ -226,12 +229,9 @@ function addSnapshot(snap) {
   // Avoid duplicates
   if (cells.some(c => c.id === snap.id && c.key === PROJ_KEYS[0])) return;
 
-  // Build 4 new cells for this snapshot
-  const newCells = shuffle([...PROJ_KEYS]).map(key => ({
-    id:  snap.id,
-    key,
-    src: snap.images[key],
-  }));
+  const newCells = shuffle([...PROJ_KEYS])
+    .map(key => ({ id: snap.id, key, src: snap.images[key] }))
+    .filter(c => c.src);
 
   // Insert them at spread-out positions rather than all at the front
   const step = Math.max(1, Math.floor((cells.length + 4) / 4));
