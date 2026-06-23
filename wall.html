@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Projection Wall</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Mono&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:     #0e0e0e;
+      --border: #1e1e1e;
+      --accent: #c8f060;
+      --muted:  #444;
+      --font:   'Space Mono', monospace;
+    }
+
+    html, body {
+      width: 100%; height: 100%;
+      background: var(--bg);
+      color: #e8e8e0;
+      font-family: var(--font);
+      overflow: hidden;
+    }
+
+    /* ── WALL GRID ─────────────────────────────── */
+    #wall {
+      width: 100vw;
+      height: 100vh;
+      display: grid;
+      gap: 6px;
+      padding: 6px;
+      align-items: center;
+      justify-items: center;
+      transition: grid-template-columns 0.4s ease, grid-template-rows 0.4s ease;
+    }
+
+    /* Each snapshot = 4 projections in a 2×2 sub-grid */
+    .snapshot {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr;
+      gap: 3px;
+      width: 100%;
+      height: 100%;
+      animation: fadeIn 0.6s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: scale(0.97); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+
+    .proj-img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+
+    /* ── EMPTY STATE ────────────────────────────── */
+    #empty {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 0.75rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      pointer-events: none;
+    }
+    #empty svg { opacity: 0.2; }
+    #empty.hidden { display: none; }
+
+    /* ── CLEAR BUTTON ───────────────────────────── */
+    #clear-btn {
+      position: fixed;
+      bottom: 16px;
+      right: 16px;
+      padding: 8px 14px;
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--muted);
+      border-radius: 4px;
+      font-family: var(--font);
+      font-size: 0.65rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.2s, color 0.2s, border-color 0.2s;
+    }
+    #clear-btn:hover { color: #e55; border-color: #e55; }
+    body:hover #clear-btn { opacity: 1; }
+
+    /* ── LIVE INDICATOR ─────────────────────────── */
+    #live-dot {
+      position: fixed;
+      top: 14px;
+      right: 16px;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background 0.3s;
+    }
+    #live-dot.pulse {
+      background: var(--accent);
+      animation: pulse 1s ease-out forwards;
+    }
+    @keyframes pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(200,240,96,0.7); }
+      70%  { box-shadow: 0 0 0 10px rgba(200,240,96,0); }
+      100% { box-shadow: 0 0 0 0 rgba(200,240,96,0); background: var(--muted); }
+    }
+  </style>
+</head>
+<body>
+
+<div id="wall"></div>
+
+<div id="empty">
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+    <rect x="3" y="3" width="18" height="18" rx="2"/>
+    <path d="M3 9h18M9 21V9"/>
+  </svg>
+  Waiting for photos…
+</div>
+
+<div id="live-dot"></div>
+
+<button id="clear-btn">Clear wall</button>
+
+<script>
+const STORAGE_KEY = 'photobooth-wall-snapshots';
+const CHANNEL_NAME = 'photobooth-wall';
+
+const wall     = document.getElementById('wall');
+const empty    = document.getElementById('empty');
+const liveDot  = document.getElementById('live-dot');
+const clearBtn = document.getElementById('clear-btn');
+
+// ── STORAGE ──────────────────────────────────────
+// Snapshots stored as array of { id, images: {mercator, peters, robinson, goode} }
+// We store only image URLs (JPEG data URLs) – each snapshot ~300–500 KB.
+// localStorage limit is ~5–10 MB so we cap at ~15 snapshots to be safe.
+const MAX_SNAPSHOTS = 15;
+
+function loadSnapshots() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+  } catch { return []; }
+}
+
+function saveSnapshots(snapshots) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshots));
+  } catch (e) {
+    // localStorage full – drop the oldest and retry
+    snapshots.shift();
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshots)); } catch {}
+  }
+}
+
+// ── LAYOUT ───────────────────────────────────────
+// Arrange N snapshots in the most square-ish grid possible,
+// favouring more columns than rows (landscape screen).
+function updateGridLayout(n) {
+  if (n === 0) return;
+  const cols = Math.ceil(Math.sqrt(n * (window.innerWidth / window.innerHeight)));
+  const rows = Math.ceil(n / cols);
+  wall.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+  wall.style.gridTemplateRows    = `repeat(${rows}, 1fr)`;
+}
+
+// ── RENDER ───────────────────────────────────────
+const PROJ_KEYS   = ['mercator', 'peters', 'robinson', 'goode'];
+const PROJ_LABELS = ['Mercator', 'Gall–Peters', 'Robinson', "Goode's"];
+
+function renderSnapshot(snap) {
+  const div = document.createElement('div');
+  div.className = 'snapshot';
+  div.dataset.id = snap.id;
+
+  PROJ_KEYS.forEach(key => {
+    const img = document.createElement('img');
+    img.className = 'proj-img';
+    img.src = snap.images[key];
+    img.alt = PROJ_LABELS[PROJ_KEYS.indexOf(key)];
+    div.appendChild(img);
+  });
+
+  wall.appendChild(div);
+}
+
+function renderAll(snapshots) {
+  wall.innerHTML = '';
+  snapshots.forEach(renderSnapshot);
+  updateGridLayout(snapshots.length);
+  empty.classList.toggle('hidden', snapshots.length > 0);
+}
+
+// ── ADD NEW SNAPSHOT ─────────────────────────────
+function addSnapshot(snap) {
+  const snapshots = loadSnapshots();
+
+  // Avoid duplicates (e.g. if multiple tabs are open)
+  if (snapshots.some(s => s.id === snap.id)) return;
+
+  snapshots.push({ id: snap.id, images: snap.images });
+
+  // Cap history
+  while (snapshots.length > MAX_SNAPSHOTS) snapshots.shift();
+
+  saveSnapshots(snapshots);
+  renderSnapshot(snap);
+  updateGridLayout(snapshots.length);
+  empty.classList.add('hidden');
+
+  // Flash live indicator
+  liveDot.classList.remove('pulse');
+  void liveDot.offsetWidth; // reflow to restart animation
+  liveDot.classList.add('pulse');
+  liveDot.addEventListener('animationend', () => liveDot.classList.remove('pulse'), { once: true });
+}
+
+// ── BROADCAST CHANNEL ────────────────────────────
+const channel = new BroadcastChannel(CHANNEL_NAME);
+
+channel.addEventListener('message', e => {
+  const data = e.data;
+  // Accept both payload shapes from the photobooth
+  if (data?.type === 'new-photo' || data?.type === 'snapshot') {
+    addSnapshot({ id: data.id ?? data.timestamp ?? Date.now(), images: data.images });
+  }
+});
+
+// ── CLEAR ────────────────────────────────────────
+clearBtn.addEventListener('click', () => {
+  if (!confirm('Clear all photos from the wall?')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  renderAll([]);
+});
+
+// ── INIT ─────────────────────────────────────────
+renderAll(loadSnapshots());
+
+// Re-layout on resize
+window.addEventListener('resize', () => {
+  updateGridLayout(loadSnapshots().length);
+});
+</script>
+
+</body>
+</html>
