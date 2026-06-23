@@ -144,7 +144,16 @@ const clearBtn = document.getElementById('clear-btn');
 const PROJ_KEYS  = ['mercator', 'peters', 'robinson', 'goode'];
 const MAX_IMAGES = 120;
 
-// ── GRID LAYOUT ────────────────────────────────── // We keep a flat list of placed cells (each = one projection image). // Grid dimensions are calculated to keep cells roughly square-ish. function computeGrid(n) { if (n === 0) return { cols: 4, rows: 3 }; const aspect = window.innerWidth / window.innerHeight; const cols = Math.max(3, Math.round(Math.sqrt(n * aspect))); const rows = Math.ceil(n / cols); return { cols: Math.max(cols, 1), rows: Math.max(rows, 1) }; } function applyGrid(cols, rows) { wall.style.setProperty('--cols', cols); wall.style.setProperty('--rows', rows); }
+// ── GRID LAYOUT ────────────────────────────────── 
+  // We keep a flat list of placed cells (each = one projection image). 
+  // Grid dimensions are calculated to keep cells roughly square-ish. 
+  function computeGrid(n) { if (n === 0) return { cols: 4, rows: 3 }; 
+                           const aspect = window.innerWidth / window.innerHeight; 
+                           const cols = Math.max(3, Math.round(Math.sqrt(n * aspect))); 
+                           const rows = Math.ceil(n / cols); 
+                           return { cols: Math.max(cols, 1), rows: Math.max(rows, 1) }; 
+                          } 
+
 
 function applyGrid(cols, rows) {
   wall.style.setProperty('--cols', cols);
