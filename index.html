@@ -30,26 +30,22 @@
       width: 100vw;
       height: 100vh;
       display: grid;
-      gap: 6px;
-      padding: 6px;
-      align-items: center;
-      justify-items: center;
-      transition: grid-template-columns 0.4s ease, grid-template-rows 0.4s ease;
+      grid-template-columns: repeat(var(--cols), 1fr);
+      grid-template-rows: repeat(var(--rows), 1fr);
+      gap: 4px;
+      padding: 4px;
     }
 
-    /* Each snapshot = 4 projections in a 2×2 sub-grid */
-    .snapshot {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      grid-template-rows: 1fr 1fr;
-      gap: 3px;
+    /* Each cell holds one projection image */
+    .proj-cell {
       width: 100%;
       height: 100%;
-      animation: fadeIn 0.6s ease;
+      overflow: hidden;
+      animation: fadeIn 0.5s ease both;
     }
 
     @keyframes fadeIn {
-      from { opacity: 0; transform: scale(0.97); }
+      from { opacity: 0; transform: scale(0.96); }
       to   { opacity: 1; transform: scale(1); }
     }
 
@@ -137,98 +133,122 @@
 <button id="clear-btn">Clear wall</button>
 
 <script>
-const STORAGE_KEY = 'photobooth-wall-snapshots';
+const STORAGE_KEY  = 'photobooth-wall-snapshots';
 const CHANNEL_NAME = 'photobooth-wall';
 
-const wall     = document.getElementById('wall');
-const empty    = document.getElementById('empty');
-const liveDot  = document.getElementById('live-dot');
+const wall    = document.getElementById('wall');
+const empty   = document.getElementById('empty');
+const liveDot = document.getElementById('live-dot');
 const clearBtn = document.getElementById('clear-btn');
 
-// ── STORAGE ──────────────────────────────────────
-// Snapshots stored as array of { id, images: {mercator, peters, robinson, goode} }
-// We store only image URLs (JPEG data URLs) – each snapshot ~300–500 KB.
-// localStorage limit is ~5–10 MB so we cap at ~15 snapshots to be safe.
-const MAX_SNAPSHOTS = 15;
+const PROJ_KEYS   = ['mercator', 'peters', 'robinson', 'goode'];
+const MAX_IMAGES  = 60; // max individual cells on the wall
 
-function loadSnapshots() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-  } catch { return []; }
+// ── GRID LAYOUT ──────────────────────────────────
+// We keep a flat list of placed cells (each = one projection image).
+// Grid dimensions are calculated to keep cells roughly square-ish.
+
+function computeGrid(n) {
+  if (n === 0) return { cols: 4, rows: 3 };
+  const aspect = window.innerWidth / window.innerHeight;
+  const cols = Math.max(3, Math.round(Math.sqrt(n * aspect)));
+  const rows = Math.ceil(n / cols);
+  return { cols: Math.max(cols, 1), rows: Math.max(rows, 1) };
 }
 
-function saveSnapshots(snapshots) {
+function applyGrid(cols, rows) {
+  wall.style.setProperty('--cols', cols);
+  wall.style.setProperty('--rows', rows);
+}
+
+// ── STORAGE ──────────────────────────────────────
+// Store flat list of { id, key, src } — one entry per projection image
+
+function loadCells() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
+  catch { return []; }
+}
+
+function saveCells(cells) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshots));
-  } catch (e) {
-    // localStorage full – drop the oldest and retry
-    snapshots.shift();
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshots)); } catch {}
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(cells));
+  } catch {
+    // full — trim oldest quarter and retry
+    const trimmed = cells.slice(Math.floor(cells.length / 4));
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed)); } catch {}
   }
 }
 
-// ── RENDER ───────────────────────────────────────
-const PROJ_KEYS   = ['mercator', 'peters', 'robinson', 'goode'];
-const PROJ_LABELS = ['Mercator', 'Gall–Peters', 'Robinson', "Goode's"];
-
-function updateGridLayout(n) {
-  if (n === 0) return;
-  const cols = Math.max(4, Math.ceil(Math.sqrt(n * 2)));
-  wall.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-  wall.style.gridTemplateRows    = 'masonry'; // fallback under
-  wall.style.gridAutoRows        = '1fr';
+// ── SHUFFLE helper ───────────────────────────────
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
 }
 
-function renderSnapshot(snap, prepend = false) {
+// ── RENDER ───────────────────────────────────────
+function makeCell(cell, delay = 0) {
   const div = document.createElement('div');
-  div.className = 'snapshot';
-  div.dataset.id = snap.id;
+  div.className = 'proj-cell';
+  div.dataset.id  = cell.id;
+  div.dataset.key = cell.key;
+  div.style.animationDelay = delay + 's';
 
-  // Tilfeldig størrelse: 1 eller 2 kolonner/rader
-  const colSpan = Math.random() > 0.4 ? 2 : 1;
-  const rowSpan = Math.random() > 0.5 ? 2 : 1;
-  div.style.gridColumn = `span ${colSpan}`;
-  div.style.gridRow    = `span ${rowSpan}`;
+  const img = document.createElement('img');
+  img.className = 'proj-img';
+  img.src = cell.src;
+  img.alt = cell.key;
+  div.appendChild(img);
+  return div;
+}
 
-  PROJ_KEYS.forEach(key => {
-    const img = document.createElement('img');
-    img.className = 'proj-img';
-    img.src = snap.images[key];
-    img.alt = PROJ_LABELS[PROJ_KEYS.indexOf(key)];
-    div.appendChild(img);
+function renderAll(cells) {
+  wall.innerHTML = '';
+  const { cols, rows } = computeGrid(cells.length);
+  applyGrid(cols, rows);
+
+  cells.forEach((cell, i) => {
+    wall.appendChild(makeCell(cell, i * 0.04));
   });
 
-  if (prepend) wall.insertBefore(div, wall.firstChild);
-  else wall.appendChild(div);
-}
-
-function renderAll(snapshots) {
-  wall.innerHTML = '';
-  snapshots.forEach(renderSnapshot);
-  updateGridLayout(snapshots.length);
-  empty.classList.toggle('hidden', snapshots.length > 0);
+  empty.classList.toggle('hidden', cells.length > 0);
 }
 
 // ── ADD NEW SNAPSHOT ─────────────────────────────
+// Break the 4 projections into individual cells and insert them
+// at shuffled positions among existing cells so they spread out.
+
 function addSnapshot(snap) {
-  const snapshots = loadSnapshots();
+  const cells = loadCells();
 
-  // Avoid duplicates (e.g. if multiple tabs are open)
-  if (snapshots.some(s => s.id === snap.id)) return;
+  // Avoid duplicates
+  if (cells.some(c => c.id === snap.id && c.key === PROJ_KEYS[0])) return;
 
-  snapshots.unshift({ id: snap.id, images: snap.images });
+  // Build 4 new cells for this snapshot
+  const newCells = shuffle([...PROJ_KEYS]).map(key => ({
+    id:  snap.id,
+    key,
+    src: snap.images[key],
+  }));
 
-  // Cap history
-  while (snapshots.length > MAX_SNAPSHOTS) snapshots.shift();
+  // Insert them at spread-out positions rather than all at the front
+  const step = Math.max(1, Math.floor((cells.length + 4) / 4));
+  newCells.forEach((cell, i) => {
+    const pos = Math.min(i * step, cells.length);
+    cells.splice(pos, 0, cell);
+  });
 
-  saveSnapshots(snapshots);
-  renderSnapshot(snap, true);
-  updateGridLayout(snapshots.length);
-  empty.classList.add('hidden');
+  // Cap total
+  while (cells.length > MAX_IMAGES) cells.pop();
+
+  saveCells(cells);
+  renderAll(cells);
 
   // Flash live indicator
   liveDot.classList.remove('pulse');
-  void liveDot.offsetWidth; // reflow to restart animation
+  void liveDot.offsetWidth;
   liveDot.classList.add('pulse');
   liveDot.addEventListener('animationend', () => liveDot.classList.remove('pulse'), { once: true });
 }
@@ -238,7 +258,6 @@ const channel = new BroadcastChannel(CHANNEL_NAME);
 
 channel.addEventListener('message', e => {
   const data = e.data;
-  // Accept both payload shapes from the photobooth
   if (data?.type === 'new-photo' || data?.type === 'snapshot') {
     addSnapshot({ id: data.id ?? data.timestamp ?? Date.now(), images: data.images });
   }
@@ -252,11 +271,12 @@ clearBtn.addEventListener('click', () => {
 });
 
 // ── INIT ─────────────────────────────────────────
-renderAll(loadSnapshots());
+renderAll(loadCells());
 
-// Re-layout on resize
 window.addEventListener('resize', () => {
-  updateGridLayout(loadSnapshots().length);
+  const cells = loadCells();
+  const { cols, rows } = computeGrid(cells.length);
+  applyGrid(cols, rows);
 });
 </script>
 
