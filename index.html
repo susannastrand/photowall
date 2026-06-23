@@ -167,25 +167,28 @@ function saveSnapshots(snapshots) {
   }
 }
 
-// ── LAYOUT ───────────────────────────────────────
-// Arrange N snapshots in the most square-ish grid possible,
-// favouring more columns than rows (landscape screen).
-function updateGridLayout(n) {
-  if (n === 0) return;
-  const cols = Math.ceil(Math.sqrt(n * (window.innerWidth / window.innerHeight)));
-  const rows = Math.ceil(n / cols);
-  wall.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-  wall.style.gridTemplateRows    = `repeat(${rows}, 1fr)`;
-}
-
 // ── RENDER ───────────────────────────────────────
 const PROJ_KEYS   = ['mercator', 'peters', 'robinson', 'goode'];
 const PROJ_LABELS = ['Mercator', 'Gall–Peters', 'Robinson', "Goode's"];
 
-function renderSnapshot(snap) {
+function updateGridLayout(n) {
+  if (n === 0) return;
+  const cols = Math.max(4, Math.ceil(Math.sqrt(n * 2)));
+  wall.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+  wall.style.gridTemplateRows    = 'masonry'; // fallback under
+  wall.style.gridAutoRows        = '1fr';
+}
+
+function renderSnapshot(snap, prepend = false) {
   const div = document.createElement('div');
   div.className = 'snapshot';
   div.dataset.id = snap.id;
+
+  // Tilfeldig størrelse: 1 eller 2 kolonner/rader
+  const colSpan = Math.random() > 0.4 ? 2 : 1;
+  const rowSpan = Math.random() > 0.5 ? 2 : 1;
+  div.style.gridColumn = `span ${colSpan}`;
+  div.style.gridRow    = `span ${rowSpan}`;
 
   PROJ_KEYS.forEach(key => {
     const img = document.createElement('img');
@@ -195,7 +198,8 @@ function renderSnapshot(snap) {
     div.appendChild(img);
   });
 
-  wall.appendChild(div);
+  if (prepend) wall.insertBefore(div, wall.firstChild);
+  else wall.appendChild(div);
 }
 
 function renderAll(snapshots) {
@@ -212,13 +216,13 @@ function addSnapshot(snap) {
   // Avoid duplicates (e.g. if multiple tabs are open)
   if (snapshots.some(s => s.id === snap.id)) return;
 
-  snapshots.push({ id: snap.id, images: snap.images });
+  snapshots.unshift({ id: snap.id, images: snap.images });
 
   // Cap history
   while (snapshots.length > MAX_SNAPSHOTS) snapshots.shift();
 
   saveSnapshots(snapshots);
-  renderSnapshot(snap);
+  renderSnapshot(snap, true);
   updateGridLayout(snapshots.length);
   empty.classList.add('hidden');
 
