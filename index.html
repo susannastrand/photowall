@@ -25,21 +25,29 @@
       overflow: hidden;
     }
 
-    /* ── WALL GRID ─────────────────────────────── */
+    /* ── WALL (flex rows, so partial last row stretches to fill) ── */
     #wall {
       width: 100vw;
       height: 100vh;
-      display: grid;
-      grid-template-columns: repeat(var(--cols), 1fr);
-      grid-template-rows: repeat(var(--rows), 1fr);
+      display: flex;
+      flex-direction: column;
       gap: 4px;
       padding: 4px;
     }
 
+    .wall-row {
+      display: flex;
+      flex: 1 1 0;
+      min-height: 0;
+      gap: 4px;
+    }
+
     /* Each cell holds one projection image */
     .proj-cell {
-      width: 100%;
-      height: 100%;
+      flex: 1 1 0;
+      min-width: 0;
+      min-height: 0;
+      position: relative;
       overflow: hidden;
       animation: fadeIn 0.5s ease both;
     }
@@ -55,6 +63,27 @@
       object-fit: contain;
       display: block;
     }
+
+    /* ── PER-IMAGE DOWNLOAD BUTTON ──────────────── */
+    .cell-download {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      width: 26px;
+      height: 26px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.6);
+      border: 1px solid var(--muted);
+      border-radius: 4px;
+      color: #e8e8e0;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .proj-cell:hover .cell-download { opacity: 1; }
+    .cell-download:hover { color: var(--accent); border-color: var(--accent); }
 
     /* ── EMPTY STATE ────────────────────────────── */
     #empty {
@@ -74,11 +103,19 @@
     #empty svg { opacity: 0.2; }
     #empty.hidden { display: none; }
 
-    /* ── CLEAR BUTTON ───────────────────────────── */
-    #clear-btn {
+    /* ── BOTTOM CONTROLS ────────────────────────── */
+    #controls {
       position: fixed;
       bottom: 16px;
       right: 16px;
+      display: flex;
+      gap: 8px;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    body:hover #controls { opacity: 1; }
+
+    #controls button {
       padding: 8px 14px;
       background: transparent;
       color: var(--muted);
@@ -89,11 +126,10 @@
       letter-spacing: 0.08em;
       text-transform: uppercase;
       cursor: pointer;
-      opacity: 0;
-      transition: opacity 0.2s, color 0.2s, border-color 0.2s;
+      transition: color 0.2s, border-color 0.2s;
     }
+    #save-btn:hover { color: var(--accent); border-color: var(--accent); }
     #clear-btn:hover { color: #e55; border-color: #e55; }
-    body:hover #clear-btn { opacity: 1; }
 
     /* ── LIVE INDICATOR ─────────────────────────── */
     #live-dot {
@@ -130,34 +166,34 @@
 
 <div id="live-dot"></div>
 
-<button id="clear-btn">Clear wall</button>
+<div id="controls">
+  <button id="save-btn">Last ned alle</button>
+  <button id="clear-btn">Clear wall</button>
+</div>
 
 <script>
 const STORAGE_KEY  = 'photobooth-wall-snapshots';
 const CHANNEL_NAME = 'photobooth-wall';
 
-const wall    = document.getElementById('wall');
-const empty   = document.getElementById('empty');
-const liveDot = document.getElementById('live-dot');
+const wall     = document.getElementById('wall');
+const empty    = document.getElementById('empty');
+const liveDot  = document.getElementById('live-dot');
 const clearBtn = document.getElementById('clear-btn');
+const saveBtn  = document.getElementById('save-btn');
 
 const PROJ_KEYS  = ['mercator', 'peters', 'robinson', 'goode'];
 const MAX_IMAGES = 120;
 
 // ── GRID LAYOUT ────────────────────────────────── 
-  // We keep a flat list of placed cells (each = one projection image). 
-  // Grid dimensions are calculated to keep cells roughly square-ish. 
-  function computeGrid(n) { if (n === 0) return { cols: 4, rows: 3 }; 
-                           const aspect = window.innerWidth / window.innerHeight; 
-                           const cols = Math.max(3, Math.round(Math.sqrt(n * aspect))); 
-                           const rows = Math.ceil(n / cols); 
-                           return { cols: Math.max(cols, 1), rows: Math.max(rows, 1) }; 
-                          } 
-
-
-function applyGrid(cols, rows) {
-  wall.style.setProperty('--cols', cols);
-  wall.style.setProperty('--rows', rows);
+// We only need to decide how many cells go in each row.
+// Rows are built as flex containers, so a partial last row
+// automatically stretches its cells to fill the full width,
+// and rows themselves share the height equally.
+function computeCols(n) {
+  if (n === 0) return 4;
+  const aspect = window.innerWidth / window.innerHeight;
+  const cols = Math.max(3, Math.round(Math.sqrt(n * aspect)));
+  return Math.max(cols, 1);
 }
 
 // ── STORAGE ──────────────────────────────────────
@@ -190,6 +226,29 @@ function shuffle(arr) {
   return arr;
 }
 
+// ── DOWNLOAD helpers ──────────────────────────────
+function downloadCell(cell) {
+  const match = /^data:image\/(\w+);/.exec(cell.src);
+  const ext = match ? match[1] : 'png';
+  const a = document.createElement('a');
+  a.href = cell.src;
+  a.download = `${cell.key}-${cell.id}.${ext}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+async function downloadAll() {
+  const cells = loadCells();
+  if (cells.length === 0) return;
+  // Trigger downloads one at a time with a tiny delay so the
+  // browser doesn't block them as a popup/download flood.
+  for (const cell of cells) {
+    downloadCell(cell);
+    await new Promise(r => setTimeout(r, 150));
+  }
+}
+
 // ── RENDER ───────────────────────────────────────
 function makeCell(cell, delay = 0) {
   const div = document.createElement('div');
@@ -203,17 +262,35 @@ function makeCell(cell, delay = 0) {
   img.src = cell.src;
   img.alt = cell.key;
   div.appendChild(img);
+
+  const dl = document.createElement('button');
+  dl.className = 'cell-download';
+  dl.title = 'Last ned bilde';
+  dl.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/>
+    </svg>`;
+  dl.addEventListener('click', (e) => {
+    e.stopPropagation();
+    downloadCell(cell);
+  });
+  div.appendChild(dl);
+
   return div;
 }
 
 function renderAll(cells) {
   wall.innerHTML = '';
-  const { cols, rows } = computeGrid(cells.length);
-  applyGrid(cols, rows);
+  const cols = computeCols(cells.length);
 
-  cells.forEach((cell, i) => {
-    wall.appendChild(makeCell(cell, i * 0.04));
-  });
+  for (let i = 0; i < cells.length; i += cols) {
+    const rowCells = cells.slice(i, i + cols);
+    const rowDiv = document.createElement('div');
+    rowDiv.className = 'wall-row';
+    rowCells.forEach((cell, idx) => {
+      rowDiv.appendChild(makeCell(cell, (i + idx) * 0.04));
+    });
+    wall.appendChild(rowDiv);
+  }
 
   empty.classList.toggle('hidden', cells.length > 0);
 }
@@ -269,13 +346,16 @@ clearBtn.addEventListener('click', () => {
   renderAll([]);
 });
 
+// ── SAVE ALL ──────────────────────────────────────
+saveBtn.addEventListener('click', () => {
+  downloadAll();
+});
+
 // ── INIT ─────────────────────────────────────────
 renderAll(loadCells());
 
 window.addEventListener('resize', () => {
-  const cells = loadCells();
-  const { cols, rows } = computeGrid(cells.length);
-  applyGrid(cols, rows);
+  renderAll(loadCells());
 });
 </script>
 
