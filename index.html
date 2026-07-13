@@ -52,6 +52,15 @@
       animation: fadeIn 0.5s ease both;
     }
 
+    /* Partial last row: cells keep the SAME width as a full row's
+       cells (don't stretch to fill), so they line up in size with
+       every row above. Any leftover space is just left empty (it's
+       black, same as the background, so it reads as a clean edge
+       rather than a hole). */
+    .wall-row.partial .proj-cell {
+      flex: 0 0 var(--cell-w);
+    }
+
     @keyframes fadeIn {
       from { opacity: 0; transform: scale(0.96); }
       to   { opacity: 1; transform: scale(1); }
@@ -424,11 +433,19 @@ function makeCell(cell, delay = 0) {
 function renderAll(cells) {
   wall.innerHTML = '';
   const cols = computeCols(cells.length);
+  const gap = 4; // matches the CSS gap on .wall-row
+  const cellWidth = `calc((100% - ${(cols - 1) * gap}px) / ${cols})`;
 
   for (let i = 0; i < cells.length; i += cols) {
     const rowCells = cells.slice(i, i + cols);
     const rowDiv = document.createElement('div');
     rowDiv.className = 'wall-row';
+    if (rowCells.length < cols) {
+      // Incomplete last row: keep cells the same size as the rows
+      // above instead of stretching them wider to fill the line.
+      rowDiv.classList.add('partial');
+      rowDiv.style.setProperty('--cell-w', cellWidth);
+    }
     rowCells.forEach((cell, idx) => {
       rowDiv.appendChild(makeCell(cell, (i + idx) * 0.04));
     });
