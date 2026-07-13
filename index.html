@@ -60,7 +60,10 @@
     .proj-img {
       width: 100%;
       height: 100%;
-      object-fit: contain;
+      /* cover (not contain) so every cell is filled edge-to-edge,
+         no letterbox gaps — the whole 1280x800 wall stays covered */
+      object-fit: cover;
+      object-position: center;
       display: block;
     }
 
@@ -109,6 +112,7 @@
       bottom: 16px;
       right: 16px;
       display: flex;
+      align-items: center;
       gap: 8px;
       opacity: 0;
       transition: opacity 0.2s;
@@ -129,7 +133,18 @@
       transition: color 0.2s, border-color 0.2s;
     }
     #save-btn:hover { color: var(--accent); border-color: var(--accent); }
+    #folder-btn:hover { color: var(--accent); border-color: var(--accent); }
     #clear-btn:hover { color: #e55; border-color: #e55; }
+
+    #save-status {
+      font-family: var(--font);
+      font-size: 0.6rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 6px 4px;
+    }
+    #save-status.on { color: var(--accent); }
 
     /* ── LIVE INDICATOR ─────────────────────────── */
     #live-dot {
@@ -167,7 +182,9 @@
 <div id="live-dot"></div>
 
 <div id="controls">
-  <button id="save-btn">Download alle</button>
+  <span id="save-status">Auto-lagring: av</span>
+  <button id="folder-btn">Velg lagringsmappe</button>
+  <button id="save-btn">Last ned alle</button>
   <button id="clear-btn">Clear wall</button>
 </div>
 
@@ -175,11 +192,13 @@
 const STORAGE_KEY  = 'photobooth-wall-snapshots';
 const CHANNEL_NAME = 'photobooth-wall';
 
-const wall     = document.getElementById('wall');
-const empty    = document.getElementById('empty');
-const liveDot  = document.getElementById('live-dot');
-const clearBtn = document.getElementById('clear-btn');
-const saveBtn  = document.getElementById('save-btn');
+const wall       = document.getElementById('wall');
+const empty      = document.getElementById('empty');
+const liveDot    = document.getElementById('live-dot');
+const clearBtn   = document.getElementById('clear-btn');
+const saveBtn    = document.getElementById('save-btn');
+const folderBtn  = document.getElementById('folder-btn');
+const saveStatus = document.getElementById('save-status');
 
 const PROJ_KEYS  = ['mercator', 'peters', 'robinson', 'goode'];
 const MAX_IMAGES = 640;
@@ -188,15 +207,18 @@ const MAX_IMAGES = 640;
 // We only need to decide how many cells go in each row.
 // Rows are built as flex containers, so a partial last row
 // automatically stretches its cells to fill the full width,
-// and rows themselves share the height equally.
+// and rows themselves share the height equally. Combined with
+// object-fit:cover on each image, every cell — including a
+// partial last row — is fully covered edge-to-edge, so the
+// whole 1280x800 wall stays filled with no gaps.
 function computeCols(n) {
   if (n === 0) return 4;
-  const aspect = window.innerWidth / window.innerHeight;
+  const aspect = window.innerWidth / window.innerHeight; // ~1.6 on the 1280x800 projector
   const cols = Math.max(3, Math.round(Math.sqrt(n * aspect)));
   return Math.max(cols, 1);
 }
 
-// ── STORAGE ──────────────────────────────────────
+// ── STORAGE (wall state, shown via BroadcastChannel) ─────────
 // Store flat list of { id, key, src } — one entry per projection image
 
 function loadCells() {
@@ -226,7 +248,7 @@ function shuffle(arr) {
   return arr;
 }
 
-// ── DOWNLOAD helpers ──────────────────────────────
+// ── MANUAL DOWNLOAD helpers (fallback / "Last ned alle") ────
 function downloadCell(cell) {
   const match = /^data:image\/(\w+);/.exec(cell.src);
   const ext = match ? match[1] : 'png';
@@ -241,13 +263,134 @@ function downloadCell(cell) {
 async function downloadAll() {
   const cells = loadCells();
   if (cells.length === 0) return;
-  // Trigger downloads one at a time with a tiny delay so the
-  // browser doesn't block them as a popup/download flood.
   for (const cell of cells) {
     downloadCell(cell);
     await new Promise(r => setTimeout(r, 150));
   }
 }
+
+// ── AUTO-SAVE TO DISK (File System Access API) ───────────────
+// Lets the wall write every incoming photo straight to a folder
+// on the iMac's disk, with no per-photo click needed. The user
+// picks the folder once (browser gesture required); the handle
+// is remembered in IndexedDB so it survives page reloads.
+// Supported in Chrome/Edge on the Mac. Safari does not support
+// this API yet — see the fallback further down.
+
+const DB_NAME = 'wall-fs-db';
+const STORE_NAME = 'handles';
+
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(STORE_NAME);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbGet(key) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const r = tx.objectStore(STORE_NAME).get(key);
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+}
+async function idbSet(key, val) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).put(val, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+let dirHandle = null;
+let autoSaveEnabled = false;
+const savedFileNames = new Set(); // avoid re-writing the same photo repeatedly
+
+function updateSaveStatus() {
+  if (autoSaveEnabled) {
+    saveStatus.textContent = 'Auto-lagring: på';
+    saveStatus.classList.add('on');
+  } else {
+    saveStatus.textContent = 'Auto-lagring: av';
+    saveStatus.classList.remove('on');
+  }
+}
+
+async function verifyPermission(handle, readWrite = true) {
+  const opts = readWrite ? { mode: 'readwrite' } : {};
+  if ((await handle.queryPermission(opts)) === 'granted') return true;
+  if ((await handle.requestPermission(opts)) === 'granted') return true;
+  return false;
+}
+
+async function saveCellToDisk(cell) {
+  if (!dirHandle || !autoSaveEnabled) return;
+  const match = /^data:image\/(\w+);base64,(.*)$/.exec(cell.src);
+  if (!match) return;
+  const ext = match[1];
+  const fileName = `${cell.key}-${cell.id}.${ext}`;
+  if (savedFileNames.has(fileName)) return;
+  try {
+    const base64 = match[2];
+    const bin = atob(base64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(bytes);
+    await writable.close();
+    savedFileNames.add(fileName);
+  } catch (err) {
+    console.error('Auto-save to disk failed:', err);
+  }
+}
+
+async function saveAllToDisk() {
+  if (!dirHandle || !autoSaveEnabled) return;
+  for (const cell of loadCells()) {
+    await saveCellToDisk(cell);
+  }
+}
+
+async function chooseFolder() {
+  if (!window.showDirectoryPicker) {
+    alert('Denne nettleseren støtter ikke automatisk lagring til mappe (kun Chrome/Edge). Bruk "Last ned alle" i stedet, eller åpne siden i Chrome.');
+    return;
+  }
+  try {
+    const handle = await window.showDirectoryPicker();
+    if (await verifyPermission(handle)) {
+      dirHandle = handle;
+      autoSaveEnabled = true;
+      await idbSet('dirHandle', handle);
+      updateSaveStatus();
+      await saveAllToDisk(); // catch up on photos already on the wall
+    }
+  } catch (err) {
+    // user cancelled the picker — ignore
+  }
+}
+
+async function tryRestoreFolder() {
+  if (!window.showDirectoryPicker) return;
+  try {
+    const handle = await idbGet('dirHandle');
+    if (handle && await verifyPermission(handle)) {
+      dirHandle = handle;
+      autoSaveEnabled = true;
+      updateSaveStatus();
+    }
+  } catch {
+    // no stored handle, or permission not (yet) granted — user can click "Velg lagringsmappe"
+  }
+}
+
+folderBtn.addEventListener('click', chooseFolder);
 
 // ── RENDER ───────────────────────────────────────
 function makeCell(cell, delay = 0) {
@@ -322,6 +465,9 @@ function addSnapshot(snap) {
   saveCells(cells);
   renderAll(cells);
 
+  // Write the new photos straight to disk, if a folder was chosen
+  newCells.forEach(cell => saveCellToDisk(cell));
+
   // Flash live indicator
   liveDot.classList.remove('pulse');
   void liveDot.offsetWidth;
@@ -346,13 +492,14 @@ clearBtn.addEventListener('click', () => {
   renderAll([]);
 });
 
-// ── SAVE ALL ──────────────────────────────────────
+// ── SAVE ALL (manual downloads, fallback) ─────────
 saveBtn.addEventListener('click', () => {
   downloadAll();
 });
 
 // ── INIT ─────────────────────────────────────────
 renderAll(loadCells());
+tryRestoreFolder();
 
 window.addEventListener('resize', () => {
   renderAll(loadCells());
